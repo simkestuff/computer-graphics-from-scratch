@@ -7,8 +7,9 @@ LDFLAGS =
 
 all: demo
 
-demo: demo.c
-	$(CC) $(CFLAGS) -o $@ $^
+demo: demo.c vec.h
+	$(CC) $(CFLAGS) -o $@ $^ -lm
 
 clean:
 	rm -f *.o demo
+
