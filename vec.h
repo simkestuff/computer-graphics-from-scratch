@@ -5,15 +5,11 @@
 
 typedef struct {
     float x, y, z;
-} Point;
-
-typedef struct {
-    float x, y, z;
 } Vec;
 
 float magnitude(Vec v);
-Vec sub_points(Point p, Point q);
-Point add_point(Point p, Vec v);
+Vec sub_points(Vec p, Vec q);
+Vec add_point(Vec p, Vec v);
 Vec add(Vec v1, Vec v2);
 Vec scalar_product(Vec v, float a);
 Vec scalar_divide(Vec v, float a);
@@ -30,15 +26,15 @@ float magnitude(Vec v)
     return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
-Vec sub_points(Point p, Point q)
+Vec sub_points(Vec p, Vec q)
 {
     Vec v = { p.x - q.x, p.y - q.y, p.z - q.z };
     return v;
 }
 
-Point add_point(Point p, Vec v)
+Vec add_point(Vec p, Vec v)
 {
-    Point q = { p.x + v.x, p.y + v.y, p.z + v.z };
+    Vec q = { p.x + v.x, p.y + v.y, p.z + v.z };
     return q;
 }
 
