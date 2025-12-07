@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <math.h>
+#include <stdint.h>
 
 #define VEC_IMPLEMENTATION
 #include "vec.h"
@@ -29,6 +30,7 @@ typedef struct {
     Vec center;
     float radius;
     Color color;
+    uint32_t specular; // how much shiny sufrace is
 } Sphere;
 
 typedef enum {
@@ -54,8 +56,9 @@ Vec canvas_to_viewpoint(int cx, int cy);
 Color TraceRay(Vec o, Vec vp, float tstart, float tstop);
 void intersect_ray_sphere(Vec o, Vec vp, Sphere *s, float *t1, float *t2);
 
-float compute_lighting(Vec point, Vec normal);
+float compute_lighting(Vec point, Vec normal, Vec camera, uint32_t specular);
 Color color_lighting(Color c, float l);
+float clamp_color(float value);
 
 void make_pic()
 {
@@ -69,10 +72,10 @@ void make_pic()
 
 int main(void)
 {
-    Sphere sr = { (Vec){0, -1, 3}, 1.0f, (Color){255, 0, 0} };
-    Sphere sb = { (Vec){2, 0, 4}, 1.0f, (Color){0, 0, 255} };
-    Sphere sg = { (Vec){-2, 0, 4}, 1.0f, (Color){0, 255, 0} };
-    Sphere sy = { (Vec){0, -5001, 0}, 5000.0f, (Color){255, 255, 0} };
+    Sphere sr = { (Vec){0, -1, 3}, 1.0f, (Color){255, 0, 0}, 500 }; // red shiny
+    Sphere sb = { (Vec){2, 0, 4}, 1.0f, (Color){0, 0, 255}, 500};   // blue shiny
+    Sphere sg = { (Vec){-2, 0, 4}, 1.0f, (Color){0, 255, 0}, 10};   // green somewhat shiny  
+    Sphere sy = { (Vec){0, -5001, 0}, 5000.0f, (Color){255, 255, 0}, 1000}; // yellow very shiny
     
 
     spheres[0] = sr;
@@ -149,7 +152,7 @@ Color TraceRay(Vec o, Vec vp, float tstart, float tstop)
     Vec n = sub_points(p, closest_sphere->center);
     n = scalar_divide(n,  magnitude(n));
     
-    return color_lighting(closest_sphere->color, compute_lighting(p, n));
+    return color_lighting(closest_sphere->color, compute_lighting(p, n, scalar_product(vp, -1), closest_sphere->specular));
 }
 
 void intersect_ray_sphere(Vec o, Vec vp, Sphere *s,  float *t1, float *t2)
@@ -172,7 +175,7 @@ void intersect_ray_sphere(Vec o, Vec vp, Sphere *s,  float *t1, float *t2)
     }
 }
 
-float compute_lighting(Vec point, Vec normal)
+float compute_lighting(Vec point, Vec normal, Vec camera, uint32_t specular)
 {
     float li = 0.0f;
 
@@ -187,9 +190,18 @@ float compute_lighting(Vec point, Vec normal)
 		direction = *lights[i].vec;
 	    }
 
+	    // difuse  
 	    float n_dot_l = dot(normal, direction);
 	    if (n_dot_l > 0) // if <0 -> illuminate back side of surface
 		li += lights[i].intensity * n_dot_l / (magnitude(normal) * magnitude(direction));
+
+	    // specular
+	    if (specular != UINT32_MAX) { // if not mate object
+		Vec reflect = sub_points(scalar_product(scalar_product(normal, dot(normal, direction)), 2), direction);
+		float r_dot_v = dot(reflect, camera);
+		if (r_dot_v > 0)
+		    li += lights[i].intensity * pow(r_dot_v / (magnitude(reflect) * magnitude(camera)), specular);
+	    }
 	}
     }
 
@@ -198,6 +210,18 @@ float compute_lighting(Vec point, Vec normal)
 
 Color color_lighting(Color c, float l)
 {
-    Color res = (Color) {c.r * l, c.g * l, c.b * l};
+    float r = clamp_color(c.r * l);
+    float g = clamp_color(c.g * l);
+    float b = clamp_color(c.b * l);
+    Color res = (Color) {r, g, b};
     return res;
+}
+
+float clamp_color(float value)
+{
+    if (value < 0.0f)
+	return 0.0f;
+    if (value > 255.0f)
+	return 255.0f;
+    return value;
 }
