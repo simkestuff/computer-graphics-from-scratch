@@ -11,5 +11,5 @@ demo: demo.c vec.h
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
 clean:
-	rm -f *.o demo
+	rm -f *.o demo ./pic.ppm
 

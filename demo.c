@@ -31,6 +31,7 @@ typedef struct {
     float radius;
     Color color;
     uint32_t specular; // how much shiny sufrace is
+    float reflective;  // how much reflective surface is
 } Sphere;
 
 typedef enum {
@@ -53,12 +54,14 @@ Light lights[LIGHTNUM];
 
 void putPixel(int x, int y, Color color); // takes screen coord's!
 Vec canvas_to_viewpoint(int cx, int cy);
-Color TraceRay(Vec o, Vec vp, float tstart, float tstop);
+Color TraceRay(Vec o, Vec vp, float tstart, float tstop, int rec_depth);
 void intersect_ray_sphere(Vec o, Vec vp, Sphere *s, float *t1, float *t2);
-
+Sphere *closest_intersection(Vec o,  Vec d, float tstart, float tstop, float *closest);
+Vec reflect_ray(Vec ray, Vec normal);
 float compute_lighting(Vec point, Vec normal, Vec camera, uint32_t specular);
 Color color_lighting(Color c, float l);
 float clamp_color(float value);
+Color color_add(Color first, Color second);
 
 void make_pic()
 {
@@ -72,12 +75,11 @@ void make_pic()
 
 int main(void)
 {
-    Sphere sr = { (Vec){0, -1, 3}, 1.0f, (Color){255, 0, 0}, 500 }; // red shiny
-    Sphere sb = { (Vec){2, 0, 4}, 1.0f, (Color){0, 0, 255}, 500};   // blue shiny
-    Sphere sg = { (Vec){-2, 0, 4}, 1.0f, (Color){0, 255, 0}, 10};   // green somewhat shiny  
-    Sphere sy = { (Vec){0, -5001, 0}, 5000.0f, (Color){255, 255, 0}, 1000}; // yellow very shiny
+    Sphere sr = { (Vec){0, -1, 3},    1.0f,    (Color){255, 0, 0},   500,  0.2f}; 
+    Sphere sb = { (Vec){2, 0, 4},     1.0f,    (Color){0, 0, 255},   500,  0.3f}; 
+    Sphere sg = { (Vec){-2, 0, 4},    1.0f,    (Color){0, 255, 0},   10,   0.4f}; 
+    Sphere sy = { (Vec){0, -5001, 0}, 5000.0f, (Color){255, 255, 0}, 1000, 0.5f}; 
     
-
     spheres[0] = sr;
     spheres[1] = sb;
     spheres[2] = sg;
@@ -103,9 +105,10 @@ int main(void)
 
 	    // map canvas coord onto viewport
 	    Vec p = canvas_to_viewpoint(cx, cy);
+	    p = scalar_divide(p, magnitude(p));
 
 	    // get color out in the world
-	    Color color = TraceRay(origin, p, 1.0, INFINITY);
+	    Color color = TraceRay(origin, p, 1.0, INFINITY, 4);
 	    putPixel(j, i, color);
 	}
     }
@@ -125,7 +128,7 @@ void putPixel(int x, int y, Color color)
     FrameBuffer[y][x] = color;
 }
 
-Color TraceRay(Vec o, Vec vp, float tstart, float tstop)
+Sphere *closest_intersection(Vec o,  Vec d, float tstart, float tstop, float *res)
 {
     float closest = INFINITY;
     Sphere *closest_sphere = NULL;
@@ -133,7 +136,7 @@ Color TraceRay(Vec o, Vec vp, float tstart, float tstop)
     
     for (size_t i = 0; i < SPHERENUM; ++i) {
 	
-	intersect_ray_sphere(o, vp, &spheres[i], &t1, &t2);
+	intersect_ray_sphere(o, d, &spheres[i], &t1, &t2);
 	
 	if (t1 > tstart && t1 < tstop && t1 < closest) {
 	    closest = t1;
@@ -144,22 +147,52 @@ Color TraceRay(Vec o, Vec vp, float tstart, float tstop)
 	    closest_sphere = &spheres[i];
 	}
     }
-    
+
+    *res = closest;
+    return closest_sphere;
+}
+
+Color TraceRay(Vec o, Vec vp, float tstart, float tstop, int rec_depth)
+{
+    float closest = 0.0f;
+    Sphere *closest_sphere = closest_intersection(o, vp, tstart, tstop, &closest);
     if (closest_sphere == NULL)
 	return (Color){255, 255, 255};
 
+    // compute local color
     Vec p = add_point(o, scalar_product(vp, closest));
     Vec n = sub_points(p, closest_sphere->center);
     n = scalar_divide(n,  magnitude(n));
     
-    return color_lighting(closest_sphere->color, compute_lighting(p, n, scalar_product(vp, -1), closest_sphere->specular));
+    Color local_color = color_lighting(closest_sphere->color, compute_lighting(p, n, scalar_product(vp, -1), closest_sphere->specular));
+
+    // if we hit recursion limit or the object is not reflective we are done
+    float reflective = closest_sphere->reflective;
+    if (rec_depth <= 0 || reflective <= 0)
+	return local_color;
+
+    // compute reflected color
+    Vec ref_ray = reflect_ray(scalar_product(vp, -1), n);
+    ref_ray = scalar_divide(ref_ray, magnitude(ref_ray));
+    Color reflected_color = TraceRay(p, ref_ray, 0.001f, INFINITY, rec_depth - 1);
+
+    //return color_add(color_lighting(local_color, (1 - reflective)), color_lighting(reflected_color, reflective));
+    return color_add(color_lighting(local_color, (1 - reflective)), color_lighting(reflected_color, reflective));
+}
+
+Vec reflect_ray(Vec ray, Vec normal)
+{
+    float dot_n_r = dot(normal, ray);
+    Vec scaled = scalar_product(normal, dot_n_r * 2);
+    return sub_points(scaled, ray);
 }
 
 void intersect_ray_sphere(Vec o, Vec vp, Sphere *s,  float *t1, float *t2)
 {
     float radius = s->radius;
     Vec co = sub_points(o, s->center);
-    Vec ray = sub_points(vp, o);
+    //Vec ray = sub_points(vp, o);
+    Vec ray = vp;
 
     float a = dot(ray, ray);
     float b = 2 * dot(co, ray);
@@ -177,7 +210,9 @@ void intersect_ray_sphere(Vec o, Vec vp, Sphere *s,  float *t1, float *t2)
 
 float compute_lighting(Vec point, Vec normal, Vec camera, uint32_t specular)
 {
+    camera = scalar_divide(camera, magnitude(camera));
     float li = 0.0f;
+    float tmax = INFINITY;
 
     for (size_t i = 0; i < LIGHTNUM; ++i) {
 	Vec direction;
@@ -186,8 +221,18 @@ float compute_lighting(Vec point, Vec normal, Vec camera, uint32_t specular)
 	else {
 	    if (lights[i].type == POINT) {
 		direction = sub_points(*lights[i].vec, point);
+		tmax = 1;
 	    } else {
 		direction = *lights[i].vec;
+		tmax = INFINITY;
+	    }
+
+	    direction = scalar_divide(direction, magnitude(direction));
+	    
+	    float closest = 0.0f;
+	    Sphere *shadow_sphere = closest_intersection(point, direction, 0.001f, tmax, &closest);
+	    if (shadow_sphere != NULL) {
+		continue;
 	    }
 
 	    // difuse  
@@ -197,7 +242,8 @@ float compute_lighting(Vec point, Vec normal, Vec camera, uint32_t specular)
 
 	    // specular
 	    if (specular != UINT32_MAX) { // if not mate object
-		Vec reflect = sub_points(scalar_product(scalar_product(normal, dot(normal, direction)), 2), direction);
+		Vec reflect = reflect_ray(direction, normal);
+		reflect = scalar_divide(reflect, magnitude(reflect));
 		float r_dot_v = dot(reflect, camera);
 		if (r_dot_v > 0)
 		    li += lights[i].intensity * pow(r_dot_v / (magnitude(reflect) * magnitude(camera)), specular);
@@ -224,4 +270,13 @@ float clamp_color(float value)
     if (value > 255.0f)
 	return 255.0f;
     return value;
+}
+
+Color color_add(Color first, Color second)
+{
+    float r = clamp_color(first.r + second.r);
+    float g = clamp_color(first.g + second.g);
+    float b = clamp_color(first.b + second.b);
+
+    return (Color){r, g, b};
 }
