@@ -32,6 +32,11 @@ Vec sub_points(Vec p, Vec q)
     return v;
 }
 
+Vec sub(Vec p, Vec q)
+{
+    return (Vec){p.x - q.x, p.y - q.y, p.z - q.z};
+}
+
 Vec add_point(Vec p, Vec v)
 {
     Vec q = { p.x + v.x, p.y + v.y, p.z + v.z };
