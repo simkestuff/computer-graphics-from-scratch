@@ -69,6 +69,7 @@ Color FrameBuffer[CH][CW] = {
 
 typedef struct {
     int x, y;
+    float h;  // intensity [0.0 - 1.0]
 } Point;
 
 // cx ∈ [-CW/2, CW/2)
@@ -169,6 +170,72 @@ void draw_filled_triangle(Point p0, Point p1, Point p2, Color color)
     }
 }
 
+void draw_shaded_triangle(Point p0, Point p1, Point p2, Color color)
+{
+    // sort the points so y0 < y1 < y2
+    if (p1.y < p0.y) swap(Point, p0, p1);
+    if (p2.y < p0.y) swap(Point, p0, p2);
+    if (p2.y < p1.y) swap(Point, p1, p2);
+
+    // compute x coordinates of triangle edges
+    FunValues v01 = {0};
+    FunValues v02 = {0};
+    FunValues v12 = {0};
+    interpolate(p0.y, (float)p0.x, p1.y, (float)p1.x, &v01);
+    interpolate(p0.y, (float)p0.x, p2.y, (float)p2.x, &v02);
+    interpolate(p1.y, (float)p1.x, p2.y, (float)p2.x, &v12);
+
+    // compute h(intensity) along triangle sides
+    FunValues h01 = {0};
+    FunValues h02 = {0};
+    FunValues h12 = {0};
+    interpolate(p0.y, p0.h, p1.y, p1.h, &h01);
+    interpolate(p0.y, p0.h, p2.y, p2.h, &h02);
+    interpolate(p1.y, p1.h, p2.y, p2.h, &h12);
+    
+    // concanate short sides
+    FunValues v012 = {0};
+    values_append_many(&v012, v01.items, v01.count - 1); // skip last one because overlapping
+    values_append_many(&v012, v12.items, v12.count);
+
+    FunValues h012 = {0};
+    values_append_many(&h012, h01.items, h01.count - 1);
+    values_append_many(&h012, h12.items, h12.count);
+    
+    // determine which is left and which is right
+    int m = v012.count / 2;
+    FunValues  *x_left;
+    FunValues  *x_right;
+    FunValues *h_left;
+    FunValues *h_right;
+    if (v02.items[m] < v012.items[m]) {
+	x_left = &v02;
+	h_left = &h02;
+	x_right = &v012;
+	h_right = &h012;
+    } else {
+	x_left = &v012;
+	h_left = &h012;
+	x_right = &v02;
+	h_right = &h02;
+    }
+
+    // draw horizontal segments with color shading
+    for (int y = p0.y; y < p2.y; ++y) {
+	int x_l = x_left->items[y - p0.y];
+	int x_r = x_right->items[y - p0.y];
+	FunValues h_segment = {0};
+	interpolate(x_l, h_left->items[y - p0.y], x_r, h_right->items[y - p0.y], &h_segment);
+	for (int x = x_l; x < x_r; ++x) {
+	    Color shaded_color = {.R = color.R * h_segment.items[x - x_l],
+				  .G = color.G * h_segment.items[x - x_l],
+				  .B = color.B * h_segment.items[x - x_l]};
+	    put_pixel(x, y, shaded_color);
+	}
+    }
+}
+
+
 void paint_background(Color color)
 {
     for (ssize_t cy = -CH/2; cy < CH/2; ++cy) {
@@ -190,9 +257,9 @@ void make_pic()
 int main(void)
 {
     Color color = {0};
-    Color c = {255,0,0};
-    draw_wireframe_triangle((Point){-200,-250}, (Point){200,50}, (Point){20,250}, color);
-    draw_filled_triangle((Point){-200,-250}, (Point){200,50}, (Point){20,250}, c);
+    Color c = {0,255,0};
+    draw_wireframe_triangle((Point){-200,-250,0.3}, (Point){200,50,0.2}, (Point){20,250,1.0}, color);
+    draw_shaded_triangle((Point){-200,-250,0.4}, (Point){200,50,0.2}, (Point){20,250,1.0}, c);
     
     make_pic();
     
