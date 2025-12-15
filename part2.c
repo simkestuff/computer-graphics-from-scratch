@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <math.h>
 
 #define swap(T,a,b)    \
    do {		       \
@@ -105,6 +106,55 @@ void draw_line(Point p0, Point p1, Color color)
     }
 }
 
+void draw_wireframe_triangle(Point p0, Point p1, Point p2, Color color)
+{
+    draw_line(p0, p1, color);
+    draw_line(p1, p2, color);
+    draw_line(p2, p0, color);
+}
+
+void draw_filled_triangle(Point p0, Point p1, Point p2, Color color)
+{
+    // sort the points so y0 < y1 < y2
+    if (p1.y < p0.y) swap(Point, p0, p1);
+    if (p2.y < p0.y) swap(Point, p0, p2);
+    if (p2.y < p1.y) swap(Point, p1, p2);
+
+    // compute x coordinates of triangle edges
+    FunValues v01 = {0};
+    FunValues v02 = {0};
+    FunValues v12 = {0};
+    interpolate(p0.y, (float)p0.x, p1.y, (float)p1.x, &v01);
+    interpolate(p0.y, (float)p0.x, p2.y, (float)p2.x, &v02);
+    interpolate(p1.y, (float)p1.x, p2.y, (float)p2.x, &v12);
+
+    // concanate short sides
+    FunValues v012 = {0};
+    for (size_t i = 0; i < v01.count - 1; ++i)
+	values_append(&v012, v01.items[i]);
+    for (size_t i = 0; i < v12.count; ++i)
+	values_append(&v012, v12.items[i]);
+
+    // determine which is left and which is right
+    int m = v012.count / 2;
+    FunValues  *x_left;
+    FunValues  *x_right;
+    if (v02.items[m] < v012.items[m]) {
+	x_left = &v02;
+	x_right = &v012;
+    } else {
+	x_left = &v012;
+	x_right = &v02;
+    }
+
+    // draw horizontal segments
+    for (int y = p0.y; y < p2.y; ++y) {
+	for (int x = x_left->items[y - p0.y]; x < x_right->items[y - p0.y]; ++x) {
+	    put_pixel(x, y, color);
+	}
+    }
+}
+
 void paint_background(Color color)
 {
     for (ssize_t cy = -CH/2; cy < CH/2; ++cy) {
@@ -126,8 +176,9 @@ void make_pic()
 int main(void)
 {
     Color color = {0};
-    draw_line((Point){-50,-200}, (Point){60,240}, color);
-    draw_line((Point){-200,-100}, (Point){240,120}, color);
+    Color c = {255,0,0};
+    draw_wireframe_triangle((Point){-200,-250}, (Point){200,50}, (Point){20,250}, color);
+    draw_filled_triangle((Point){-200,-250}, (Point){200,50}, (Point){20,250}, c);
     
     make_pic();
     
