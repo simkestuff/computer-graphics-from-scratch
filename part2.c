@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 #define swap(T,a,b)    \
    do {		       \
@@ -21,21 +22,36 @@ typedef struct {
     size_t capacity;
 } FunValues;
 
-void values_append(FunValues *fv, float item)
+void values_capacity_reserve(FunValues *fv, size_t capacity_expected)
 {
-    if (fv->count >= fv->capacity) {
+    if (capacity_expected >= fv->capacity) {
 	if (fv->capacity == 0) {
-	    fv->capacity = FUN_VALUES_INITIAL_CAPACITY;
+	    fv->capacity = FUN_VALUES_INITIAL_CAPACITY > capacity_expected ? FUN_VALUES_INITIAL_CAPACITY : capacity_expected;
 	} else {
-	    fv->capacity *= 2;
+	    while (fv->capacity < capacity_expected)
+		fv->capacity *= 2;
 	}
 
-	fv->items = realloc(fv->items, sizeof(float) * fv->capacity);
+	fv->items = realloc(fv->items, sizeof(*fv->items) * fv->capacity);
 
 	assert(fv->items != NULL && "memory allocation failed");
     }
 
+}
+
+void values_append(FunValues *fv, float item)
+{
+    values_capacity_reserve(fv, fv->count + 1);
+
     fv->items[fv->count++] = item;
+}
+
+void values_append_many(FunValues *fv, float *items, size_t items_count)
+{
+    values_capacity_reserve(fv, fv->count + items_count);
+    memcpy(fv->items + fv->count, items, items_count * sizeof(*fv->items));
+
+    fv->count += items_count;
 }
 
 typedef struct {
@@ -130,11 +146,9 @@ void draw_filled_triangle(Point p0, Point p1, Point p2, Color color)
 
     // concanate short sides
     FunValues v012 = {0};
-    for (size_t i = 0; i < v01.count - 1; ++i)
-	values_append(&v012, v01.items[i]);
-    for (size_t i = 0; i < v12.count; ++i)
-	values_append(&v012, v12.items[i]);
-
+    values_append_many(&v012, v01.items, v01.count - 1); // skip last one because overlapping
+    values_append_many(&v012, v12.items, v12.count);
+    
     // determine which is left and which is right
     int m = v012.count / 2;
     FunValues  *x_left;
