@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <stdbool.h>
+
+#define VEC_IMPLEMENTATION
+#include "vec.h"
 
 #define swap(T,a,b)    \
    do {		       \
@@ -12,8 +16,6 @@
         (b) = tmp;     \
     } while (0)
 
-#define CW 600  // canvas widht
-#define CH 600  // canvas height
 
 #define FUN_VALUES_INITIAL_CAPACITY 256
 typedef struct {
@@ -58,15 +60,31 @@ typedef struct {
     unsigned char R, G, B;
 } Color;
 
-#define BACKGROUND_COLOR (Color){.R = 255, .B = 255, .G = 255}
+#define BLACK (Color){.R = 0, .G = 0, .B = 0}
+#define WHITE (Color){.R = 255, .G = 255, .B = 255}
+#define RED (Color){.R = 255, .G = 0, .B = 0}
+#define GREEN (Color){.R = 0, .G = 255, .B = 0}
+#define BLUE (Color){.R = 0, .G = 0, .B = 255}
+#define BACKGROUND_COLOR WHITE
 
-// this type of initialization needs gcc/clang extension
-// use paint_background function as alternative
-Color FrameBuffer[CH][CW] = {
-    [0 ... CH-1][0 ... CW-1] = BACKGROUND_COLOR
-};
+#define CW 600  // canvas widht
+#define CH 600  // canvas height
+Color FrameBuffer[CH][CW];
 
+// point zapravo odgovara pixelu samo origin nije gore lijevo
+// vec predstavljaju točke u prostoru
+/*
+3D Point (x,y,z)
+       |
+       |  perspective projection
+       v
+Viewport (floating-point, centered at 0)
+       |
+       |  scale + shift
+       v
+Canvas (integer pixels, top-left origin)
 
+ */
 typedef struct {
     int x, y;
     float h;  // intensity [0.0 - 1.0]
@@ -79,6 +97,8 @@ void put_pixel(int x, int y, Color color)   // paint pixel to color
     int col = CW/2 + x;  
     int row = CH/2 -1 - y;
 
+    if (col < 0 || col >= CW || row < 0 || row >= CH) return;
+    
     FrameBuffer[row][col] = color;
 }
 
@@ -235,7 +255,6 @@ void draw_shaded_triangle(Point p0, Point p1, Point p2, Color color)
     }
 }
 
-
 void paint_background(Color color)
 {
     for (ssize_t cy = -CH/2; cy < CH/2; ++cy) {
@@ -254,12 +273,109 @@ void make_pic()
     
  fclose(fp);}
 
+// Vertex je točka u prostoru, Vec je točka u matematičkom prostoru
+typedef struct {
+    Vec pos;
+    float h; // intensity
+} Vertex;
+
+#define VIEWPORT_WIDTH 1.0f
+#define VIEWPORT_HEIGHT 1.0f
+#define DISTANCE 1.0f
+
+bool inside_viewport(Vec v)
+{
+    return v.x >= -VIEWPORT_WIDTH / 2  &&
+	   v.x <= VIEWPORT_WIDTH / 2  &&
+	   v.y >= -VIEWPORT_HEIGHT / 2 &&
+	   v.y <= VIEWPORT_HEIGHT / 2;
+}
+
+Vec project_to_viewport(Vec v)
+{
+    assert(v.z != 0 && "z-os value equal 0");
+    return (Vec) { .x = (v.x * DISTANCE) / v.z,
+	    	   .y = (v.y * DISTANCE) / v.z,
+	    	   .z = DISTANCE };
+}
+
+Point viewport_to_canvas(Vec vp)
+{
+    int cx = (int)((CW / VIEWPORT_WIDTH) * vp.x);
+    int cy = (int)((CH / VIEWPORT_HEIGHT) * vp.y);
+    return (Point){.x = cx, .y = cy};
+}
+
+Point project(Vertex vertex)
+{
+    Vec v = project_to_viewport(vertex.pos);
+    Point p = viewport_to_canvas(v);
+    p.h = vertex.h;
+    
+    return p;
+}
+
+void draw_line_3d(Vertex v0, Vertex v1, Color color)
+{
+    Point p0 = project(v0);
+    Point p1 = project(v1);
+
+    draw_line(p0,p1,color);
+}
+
+void draw_wireframe_triangle_3d(Vertex v0, Vertex v1, Vertex v2, Color color)
+{
+    Point p0 = project(v0);
+    Point p1 = project(v1);
+    Point p2 = project(v2);
+
+    draw_wireframe_triangle(p0,p1,p2,color);
+}
+
+void draw_shaded_triangle_3d(Vertex v0, Vertex v1, Vertex v2, Color color)
+{
+    Point p0 = project(v0);
+    Point p1 = project(v1);
+    Point p2 = project(v2);
+
+    draw_shaded_triangle(p0,p1,p2,color);
+}
+
+Vertex make_vertex(float x, float y, float z, float intensity)
+{
+    Vec v = { .x = x, .y = y, .z = z };
+    return (Vertex) { .pos = v, .h = intensity };
+}
+
 int main(void)
 {
-    Color color = {0};
-    Color c = {0,255,0};
-    draw_wireframe_triangle((Point){-200,-250,0.3}, (Point){200,50,0.2}, (Point){20,250,1.0}, color);
-    draw_shaded_triangle((Point){-200,-250,0.4}, (Point){200,50,0.2}, (Point){20,250,1.0}, c);
+    paint_background(WHITE);
+
+    // make front vertices
+    Vertex fa = make_vertex(-2,-0.5,5,1.0f);
+    Vertex fb = make_vertex(-2, 0.5,5,1.0f);
+    Vertex fc = make_vertex(-1, 0.5,5,1.0f);
+    Vertex fd = make_vertex(-1,-0.5,5,1.0f);
+    // make back vertices
+    Vertex ba = make_vertex(-2,-0.5,6,1.0f);
+    Vertex bb = make_vertex(-2, 0.5,6,1.0f);
+    Vertex bc = make_vertex(-1, 0.5,6,1.0f);
+    Vertex bd = make_vertex(-1,-0.5,6,1.0f);
+    // front face
+    draw_line_3d(fa,fb,BLUE);
+    draw_line_3d(fb,fc,BLUE);
+    draw_line_3d(fc,fd,BLUE);
+    draw_line_3d(fd,fa,BLUE);
+    // back face
+    draw_line_3d(ba,bb,RED);
+    draw_line_3d(bb,bc,RED);
+    draw_line_3d(bc,bd,RED);
+    draw_line_3d(bd,ba,RED);
+    // front to back edges
+    draw_line_3d(fa,ba,GREEN);
+    draw_line_3d(fb,bb,GREEN);
+    draw_line_3d(fc,bc,GREEN);
+    draw_line_3d(fd,bd,GREEN);
     
     make_pic();
     
