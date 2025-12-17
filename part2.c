@@ -8,6 +8,8 @@
 #define VEC_IMPLEMENTATION
 #include "vec.h"
 
+#define DEG2RAD(d) ((d) * (M_PI / 180.0f))
+
 #define swap(T,a,b)    \
    do {		       \
         T tmp;         \
@@ -17,44 +19,39 @@
     } while (0)
 
 
-#define FUN_VALUES_INITIAL_CAPACITY 256
+#define DA_INIT_CAP 256
 typedef struct {
     float *items;
     size_t count;
     size_t capacity;
 } FunValues;
 
-void values_capacity_reserve(FunValues *fv, size_t capacity_expected)
-{
-    if (capacity_expected >= fv->capacity) {
-	if (fv->capacity == 0) {
-	    fv->capacity = FUN_VALUES_INITIAL_CAPACITY > capacity_expected ? FUN_VALUES_INITIAL_CAPACITY : capacity_expected;
-	} else {
-	    while (fv->capacity < capacity_expected)
-		fv->capacity *= 2;
-	}
+#define da_reserve(da,capacity_expected)\
+do {\
+    if ((capacity_expected) >= (da)->capacity) {\
+	if ((da)->capacity == 0) {\
+	    (da)->capacity = DA_INIT_CAP > (capacity_expected) ? DA_INIT_CAP : (capacity_expected);\
+	} else {\
+	    while ((da)->capacity < (capacity_expected))\
+		(da)->capacity *= 2;\
+	}\
+	(da)->items = realloc((da)->items, sizeof(*(da)->items) * (da)->capacity);\
+	assert((da)->items != NULL && "memory allocation failed");\
+    }\
+} while (0)
 
-	fv->items = realloc(fv->items, sizeof(*fv->items) * fv->capacity);
+#define da_append(da,item) \
+do { \
+    da_reserve((da), (da)->count + 1); \
+    (da)->items[(da)->count++] = (item); \
+} while (0)
 
-	assert(fv->items != NULL && "memory allocation failed");
-    }
-
-}
-
-void values_append(FunValues *fv, float item)
-{
-    values_capacity_reserve(fv, fv->count + 1);
-
-    fv->items[fv->count++] = item;
-}
-
-void values_append_many(FunValues *fv, float *items, size_t items_count)
-{
-    values_capacity_reserve(fv, fv->count + items_count);
-    memcpy(fv->items + fv->count, items, items_count * sizeof(*fv->items));
-
-    fv->count += items_count;
-}
+#define da_append_many(da,append_items,append_items_count) \
+do { \
+    da_reserve((da), (da)->count + (append_items_count)); \
+    memcpy((da)->items + (da)->count, (append_items), (append_items_count) * sizeof(*(da)->items)); \
+    (da)->count += (append_items_count); \
+} while (0)
 
 typedef struct {
     unsigned char R, G, B;
@@ -65,6 +62,9 @@ typedef struct {
 #define RED (Color){.R = 255, .G = 0, .B = 0}
 #define GREEN (Color){.R = 0, .G = 255, .B = 0}
 #define BLUE (Color){.R = 0, .G = 0, .B = 255}
+#define PURPLE (Color){.R = 128, .G = 0, .B = 128}
+#define YELLOW (Color){.R = 255, .G = 255, .B = 0}
+#define CYAN (Color){.R = 0, .G = 255, .B = 255}
 #define BACKGROUND_COLOR WHITE
 
 #define CW 600  // canvas widht
@@ -105,12 +105,12 @@ void put_pixel(int x, int y, Color color)   // paint pixel to color
 void interpolate(int i0, float d0, int i1, float d1, FunValues *values)
 {
     if (i0 == i1) {
-	values_append(values, d0);
+	da_append(values, d0);
     } else {
 	float a = (d1 - d0) / (i1 - i0);
 	float value = d0;
 	for (int i = i0; i <= i1; ++i) {
-	    values_append(values, value);
+	    da_append(values, value);
 	    value += a;
 	}
     }
@@ -167,8 +167,8 @@ void draw_filled_triangle(Point p0, Point p1, Point p2, Color color)
 
     // concanate short sides
     FunValues v012 = {0};
-    values_append_many(&v012, v01.items, v01.count - 1); // skip last one because overlapping
-    values_append_many(&v012, v12.items, v12.count);
+    da_append_many(&v012, v01.items, v01.count - 1); // skip last one because overlapping
+    da_append_many(&v012, v12.items, v12.count);
     
     // determine which is left and which is right
     int m = v012.count / 2;
@@ -215,12 +215,12 @@ void draw_shaded_triangle(Point p0, Point p1, Point p2, Color color)
     
     // concanate short sides
     FunValues v012 = {0};
-    values_append_many(&v012, v01.items, v01.count - 1); // skip last one because overlapping
-    values_append_many(&v012, v12.items, v12.count);
+    da_append_many(&v012, v01.items, v01.count - 1); // skip last one because overlapping
+    da_append_many(&v012, v12.items, v12.count);
 
     FunValues h012 = {0};
-    values_append_many(&h012, h01.items, h01.count - 1);
-    values_append_many(&h012, h12.items, h12.count);
+    da_append_many(&h012, h01.items, h01.count - 1);
+    da_append_many(&h012, h12.items, h12.count);
     
     // determine which is left and which is right
     int m = v012.count / 2;
@@ -301,8 +301,8 @@ Vec project_to_viewport(Vec v)
 
 Point viewport_to_canvas(Vec vp)
 {
-    int cx = (int)((CW / VIEWPORT_WIDTH) * vp.x);
-    int cy = (int)((CH / VIEWPORT_HEIGHT) * vp.y);
+    int cx = (int)(((CW / 2) / (VIEWPORT_WIDTH / 2)) * vp.x);
+    int cy = (int)(((CH / 2) / (VIEWPORT_HEIGHT / 2)) * vp.y);
     return (Point){.x = cx, .y = cy};
 }
 
@@ -347,35 +347,261 @@ Vertex make_vertex(float x, float y, float z, float intensity)
     return (Vertex) { .pos = v, .h = intensity };
 }
 
+typedef struct {
+    Vertex *items;
+    size_t count;
+    size_t capacity;
+} Vertices;
+
+typedef struct {
+    size_t indices[3];
+    Color color;
+} Triangle;
+
+Triangle mk_triangle(size_t a, size_t b, size_t c, Color color)
+{
+    Triangle t = {0};
+    t.indices[0] = a;
+    t.indices[1] = b;
+    t.indices[2] = c;
+    t.color = color;
+    return t;
+}
+
+typedef struct {
+    Triangle *items;
+    size_t count;
+    size_t capacity;
+} Triangles;
+
+
+typedef struct {
+    Point *items;
+    size_t count;
+    size_t capacity;
+} ProjectedPoints;
+
+
+typedef enum {
+    UNDEF,
+    CUBE
+} ModelType;
+
+typedef struct {
+    ModelType type;
+    Vertices *vertices;
+    Triangles *triangles;
+} Model;
+
+typedef struct {
+    Vertex translation; // placement in space
+    float scale;
+    float rotation; // in degrees around os y
+} Transform;
+
+typedef struct {
+    Model *model;
+    Vertex translation;
+    float scale;
+    float rotation; // around y os
+    Transform t;
+} Instance;
+
+
+typedef struct {
+    Instance *items;
+    size_t count;
+    size_t capacity;
+} Scene;
+
+void render_triangle(Triangle t, ProjectedPoints *pp)
+{
+    draw_wireframe_triangle(pp->items[t.indices[0]], pp->items[t.indices[1]], pp->items[t.indices[2]], t.color);
+}
+
+void render_object(Vertices *vertices, Triangles *triangles)
+{
+    ProjectedPoints projected = {0};
+    for (size_t i = 0; i < vertices->count; ++i) {
+	da_append(&projected, project(vertices->items[i]));
+    }
+    for (size_t i = 0; i < triangles->count; ++i) {
+	render_triangle(triangles->items[i], &projected);
+    }
+    
+}
+
+void apply_transform(Vertex *v, Transform t)
+{
+    Vec vec = v->pos;
+    // scaling
+    vec = scalar_product(vec, t.scale);
+    // rotation
+    float x_val = vec.x;
+    vec.x = x_val * cosf(DEG2RAD(t.rotation))
+	+ vec.z * sinf(DEG2RAD(t.rotation));
+    vec.z = -x_val * sinf(DEG2RAD(t.rotation))
+	+ vec.z * cosf(DEG2RAD(t.rotation));
+    // translation
+    vec = add(vec, t.translation.pos);
+    
+    v->pos = vec;
+}
+
+void render_instance(Instance *instance)
+{
+    ProjectedPoints projected = {0};
+    Model model = *instance->model;
+    for (size_t i = 0; i < (model.vertices)->count; ++i) {
+	Vertex vx = model.vertices->items[i];
+	apply_transform(&vx, instance->t);
+	da_append(&projected, project(vx));
+	
+    }
+    for (size_t i = 0; i < (model.triangles)->count; ++i) {
+	Triangle t = model.triangles->items[i];
+	render_triangle(t, &projected);
+    }
+}
+
+// NDC means Normalized Device Coordinates.
+// It’s the coordinate space after projection and perspective divide, and before mapping to screen pixels.
+Point ndc_to_canvas(Vec4 v)
+{
+    return (Point){
+        .x = (int)(v.x * (CW / 2)),
+        .y = (int)(v.y * (CH / 2)),
+        .h = 1.0f
+    };
+}
+
+
+void render_model(Model *model, Mat4 transform)
+{
+    ProjectedPoints projected = {0};
+    for (size_t i = 0; i < (model->vertices)->count; ++i) {
+	Vertex vx = (model->vertices)->items[i];
+	
+	Vec4 vec4 = h_point(vx.pos.x, vx.pos.y, vx.pos.z);
+	vec4 = mat4_mul_vec4(transform, vec4);
+	vec4 = perspective_divide(vec4);
+	
+	vx.pos.x = vec4.x;
+	vx.pos.y = vec4.y;
+	vx.pos.z = vec4.z;
+	
+	da_append(&projected, ndc_to_canvas(vec4));
+    }
+    for (size_t i = 0; i < (model->triangles)->count; ++i) {
+	Triangle t = (model->triangles)->items[i];
+	render_triangle(t, &projected);
+    }
+}
+
+void render_scene(Scene *scene)
+{
+    // camera part
+    Vec camera = { 0, 0, 0 };
+    Mat4 m_view = mat4_translation(-camera.x, -camera.y, -camera.z);
+    
+    for (size_t i = 0; i < scene->count; ++i) {
+	Instance ins = scene->items[i];
+	Mat4 m_scale = mat4_scale(ins.t.scale,
+				  ins.t.scale,
+				  ins.t.scale);
+	Mat4 m_rotate = mat4_rotate_y(DEG2RAD(ins.t.rotation));
+	Mat4 m_translate = mat4_translation(ins.t.translation.pos.x,
+					    ins.t.translation.pos.y,
+					    ins.t.translation.pos.z);
+	Mat4 m_model = mat4_mul(m_translate, mat4_mul(m_rotate, m_scale));
+
+	Mat4 m_perspective = mat4_perspective(DISTANCE);
+
+	Mat4 MVP = mat4_mul(m_perspective, mat4_mul(m_view, m_model));
+
+	render_model(ins.model, MVP);
+    }
+}
+
+Model make_cube_model(void)
+{
+    Model cube = {0};
+    cube.type = CUBE;
+
+    // cube vertices  
+    Vertex A = make_vertex( 1,  1,  1, 1);
+    Vertex B = make_vertex(-1,  1,  1, 1);
+    Vertex C = make_vertex(-1, -1,  1, 1);
+    Vertex D = make_vertex( 1, -1,  1, 1);
+    Vertex E = make_vertex( 1,  1, -1, 1);
+    Vertex F = make_vertex(-1,  1, -1, 1);
+    Vertex G = make_vertex(-1, -1, -1, 1);
+    Vertex H = make_vertex( 1, -1, -1, 1);
+
+    Vertices * vertices = malloc(sizeof(*vertices));
+    *vertices = (Vertices){0};
+    da_append(vertices, A);
+    da_append(vertices, B);
+    da_append(vertices, C);
+    da_append(vertices, D);
+    da_append(vertices, E);
+    da_append(vertices, F);
+    da_append(vertices, G);
+    da_append(vertices, H);
+
+    cube.vertices = vertices;
+
+    Triangle t0  = mk_triangle(0, 1, 2, RED);
+    Triangle t1  = mk_triangle(0, 2, 3, RED);
+    Triangle t2  = mk_triangle(4, 0, 3, GREEN);
+    Triangle t3  = mk_triangle(4, 3, 7, GREEN);
+    Triangle t4  = mk_triangle(5, 4, 7, BLUE);
+    Triangle t5  = mk_triangle(5, 7, 6, BLUE);
+    Triangle t6  = mk_triangle(1, 5, 6, YELLOW);
+    Triangle t7  = mk_triangle(1, 6, 2, YELLOW);
+    Triangle t8  = mk_triangle(4, 5, 1, PURPLE);
+    Triangle t9  = mk_triangle(4, 1, 0, PURPLE);
+    Triangle t10 = mk_triangle(2, 6, 7, CYAN);
+    Triangle t11 = mk_triangle(2, 7, 3, CYAN);
+    
+    Triangles *triangles = malloc(sizeof(*triangles));
+    *triangles = (Triangles){0};
+    da_append(triangles, t0);
+    da_append(triangles, t1);
+    da_append(triangles, t2);
+    da_append(triangles, t3);
+    da_append(triangles, t4);
+    da_append(triangles, t5);
+    da_append(triangles, t6);
+    da_append(triangles, t7);
+    da_append(triangles, t8);
+    da_append(triangles, t9);
+    da_append(triangles, t10);
+    da_append(triangles, t11);
+
+    cube.triangles = triangles;
+
+    return cube;
+}
+
 int main(void)
 {
     paint_background(WHITE);
 
-    // make front vertices
-    Vertex fa = make_vertex(-2,-0.5,5,1.0f);
-    Vertex fb = make_vertex(-2, 0.5,5,1.0f);
-    Vertex fc = make_vertex(-1, 0.5,5,1.0f);
-    Vertex fd = make_vertex(-1,-0.5,5,1.0f);
-    // make back vertices
-    Vertex ba = make_vertex(-2,-0.5,6,1.0f);
-    Vertex bb = make_vertex(-2, 0.5,6,1.0f);
-    Vertex bc = make_vertex(-1, 0.5,6,1.0f);
-    Vertex bd = make_vertex(-1,-0.5,6,1.0f);
-    // front face
-    draw_line_3d(fa,fb,BLUE);
-    draw_line_3d(fb,fc,BLUE);
-    draw_line_3d(fc,fd,BLUE);
-    draw_line_3d(fd,fa,BLUE);
-    // back face
-    draw_line_3d(ba,bb,RED);
-    draw_line_3d(bb,bc,RED);
-    draw_line_3d(bc,bd,RED);
-    draw_line_3d(bd,ba,RED);
-    // front to back edges
-    draw_line_3d(fa,ba,GREEN);
-    draw_line_3d(fb,bb,GREEN);
-    draw_line_3d(fc,bc,GREEN);
-    draw_line_3d(fd,bd,GREEN);
+    Scene scene = {0};
+
+    Model cube_model = make_cube_model();
+
+    Transform t1 = { .scale = 0.8f, .translation = make_vertex(1,1,7,1), .rotation = 45};
+    Transform t2 = { .scale = 1.0f, .translation = make_vertex(-1.8,-1.5,5,1), .rotation = 0};
+
+    Instance cubeA = (Instance) { .model = &cube_model, .t = t1 };
+    Instance cubeB = (Instance) { .model = &cube_model, .t = t2 };
+
+    da_append(&scene, cubeA);
+    da_append(&scene, cubeB);
+    
+    render_scene(&scene);
     
     make_pic();
     
