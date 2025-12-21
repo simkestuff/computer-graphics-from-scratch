@@ -340,6 +340,11 @@ typedef struct {
     size_t capacity;
 } Scene;
 
+typedef struct {
+    Vertex pos;
+    float rotation; 
+} Camera;
+
 void render_triangle(Triangle t, ProjectedPoints *pp)
 {
     draw_wireframe_triangle(pp->items[t.indices[0]], pp->items[t.indices[1]], pp->items[t.indices[2]], t.color);
@@ -379,11 +384,16 @@ void render_model(Model *model, Mat4 transform)
     }
 }
 
-void render_scene(Scene *scene)
+Mat4 make_camera_matrix(Vertex position, float orientation)
 {
-    // camera part
-    Vec camera = { 0, 0, 0 };
-    Mat4 m_view = mat4_translation(-camera.x, -camera.y, -camera.z);
+    Mat4 iT = mat4_translation(-position.pos.x, -position.pos.y, -position.pos.z);
+    Mat4 iR = mat4_rotate_y(DEG2RAD(-orientation));
+    return mat4_mul(iR, iT);
+}
+
+void render_scene(Scene *scene, Camera *camera)
+{
+    Mat4 m_view = make_camera_matrix(camera->pos, camera->rotation);
     
     for (size_t i = 0; i < scene->count; ++i) {
 	Instance ins = scene->items[i];
@@ -469,6 +479,8 @@ int main(void)
 {
     paint_background(WHITE);
 
+    Camera camera = { .pos = (Vertex){ .pos = { 0,0,0}, .h = 1.0f }, .rotation = 0.0f };
+    
     Scene scene = {0};
 
     Model cube_model = make_cube_model();
@@ -482,7 +494,7 @@ int main(void)
     da_append(&scene, cubeA);
     da_append(&scene, cubeB);
     
-    render_scene(&scene);
+    render_scene(&scene, &camera);
     
     make_pic();
     
