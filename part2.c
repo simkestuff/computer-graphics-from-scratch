@@ -71,20 +71,7 @@ typedef struct {
 #define CH 600  // canvas height
 Color FrameBuffer[CH][CW];
 
-// point zapravo odgovara pixelu samo origin nije gore lijevo
-// vec predstavljaju točke u prostoru
-/*
-3D Point (x,y,z)
-       |
-       |  perspective projection
-       v
-Viewport (floating-point, centered at 0)
-       |
-       |  scale + shift
-       v
-Canvas (integer pixels, top-left origin)
 
- */
 typedef struct {
     int x, y;
     float h;  // intensity [0.0 - 1.0]
@@ -283,64 +270,6 @@ typedef struct {
 #define VIEWPORT_HEIGHT 1.0f
 #define DISTANCE 1.0f
 
-bool inside_viewport(Vec v)
-{
-    return v.x >= -VIEWPORT_WIDTH / 2  &&
-	   v.x <= VIEWPORT_WIDTH / 2  &&
-	   v.y >= -VIEWPORT_HEIGHT / 2 &&
-	   v.y <= VIEWPORT_HEIGHT / 2;
-}
-
-Vec project_to_viewport(Vec v)
-{
-    assert(v.z != 0 && "z-os value equal 0");
-    return (Vec) { .x = (v.x * DISTANCE) / v.z,
-	    	   .y = (v.y * DISTANCE) / v.z,
-	    	   .z = DISTANCE };
-}
-
-Point viewport_to_canvas(Vec vp)
-{
-    int cx = (int)(((CW / 2) / (VIEWPORT_WIDTH / 2)) * vp.x);
-    int cy = (int)(((CH / 2) / (VIEWPORT_HEIGHT / 2)) * vp.y);
-    return (Point){.x = cx, .y = cy};
-}
-
-Point project(Vertex vertex)
-{
-    Vec v = project_to_viewport(vertex.pos);
-    Point p = viewport_to_canvas(v);
-    p.h = vertex.h;
-    
-    return p;
-}
-
-void draw_line_3d(Vertex v0, Vertex v1, Color color)
-{
-    Point p0 = project(v0);
-    Point p1 = project(v1);
-
-    draw_line(p0,p1,color);
-}
-
-void draw_wireframe_triangle_3d(Vertex v0, Vertex v1, Vertex v2, Color color)
-{
-    Point p0 = project(v0);
-    Point p1 = project(v1);
-    Point p2 = project(v2);
-
-    draw_wireframe_triangle(p0,p1,p2,color);
-}
-
-void draw_shaded_triangle_3d(Vertex v0, Vertex v1, Vertex v2, Color color)
-{
-    Point p0 = project(v0);
-    Point p1 = project(v1);
-    Point p2 = project(v2);
-
-    draw_shaded_triangle(p0,p1,p2,color);
-}
-
 Vertex make_vertex(float x, float y, float z, float intensity)
 {
     Vec v = { .x = x, .y = y, .z = z };
@@ -401,9 +330,6 @@ typedef struct {
 
 typedef struct {
     Model *model;
-    Vertex translation;
-    float scale;
-    float rotation; // around y os
     Transform t;
 } Instance;
 
@@ -417,51 +343,6 @@ typedef struct {
 void render_triangle(Triangle t, ProjectedPoints *pp)
 {
     draw_wireframe_triangle(pp->items[t.indices[0]], pp->items[t.indices[1]], pp->items[t.indices[2]], t.color);
-}
-
-void render_object(Vertices *vertices, Triangles *triangles)
-{
-    ProjectedPoints projected = {0};
-    for (size_t i = 0; i < vertices->count; ++i) {
-	da_append(&projected, project(vertices->items[i]));
-    }
-    for (size_t i = 0; i < triangles->count; ++i) {
-	render_triangle(triangles->items[i], &projected);
-    }
-    
-}
-
-void apply_transform(Vertex *v, Transform t)
-{
-    Vec vec = v->pos;
-    // scaling
-    vec = scalar_product(vec, t.scale);
-    // rotation
-    float x_val = vec.x;
-    vec.x = x_val * cosf(DEG2RAD(t.rotation))
-	+ vec.z * sinf(DEG2RAD(t.rotation));
-    vec.z = -x_val * sinf(DEG2RAD(t.rotation))
-	+ vec.z * cosf(DEG2RAD(t.rotation));
-    // translation
-    vec = add(vec, t.translation.pos);
-    
-    v->pos = vec;
-}
-
-void render_instance(Instance *instance)
-{
-    ProjectedPoints projected = {0};
-    Model model = *instance->model;
-    for (size_t i = 0; i < (model.vertices)->count; ++i) {
-	Vertex vx = model.vertices->items[i];
-	apply_transform(&vx, instance->t);
-	da_append(&projected, project(vx));
-	
-    }
-    for (size_t i = 0; i < (model.triangles)->count; ++i) {
-	Triangle t = model.triangles->items[i];
-	render_triangle(t, &projected);
-    }
 }
 
 // NDC means Normalized Device Coordinates.
