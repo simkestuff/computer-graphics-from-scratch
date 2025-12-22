@@ -266,6 +266,11 @@ typedef struct {
     float h; // intensity
 } Vertex;
 
+typedef struct {
+    Vec4 p;
+    float h;
+} ClipVertex;
+
 #define VIEWPORT_WIDTH 1.0f
 #define VIEWPORT_HEIGHT 1.0f
 #define DISTANCE 1.0f
@@ -286,6 +291,11 @@ typedef struct {
     size_t indices[3];
     Color color;
 } Triangle;
+
+typedef struct {
+    ClipVertex v[3];
+    Color color;
+} ClipTriangle;
 
 Triangle mk_triangle(size_t a, size_t b, size_t c, Color color)
 {
@@ -350,6 +360,78 @@ void render_triangle(Triangle t, ProjectedPoints *pp)
     draw_wireframe_triangle(pp->items[t.indices[0]], pp->items[t.indices[1]], pp->items[t.indices[2]], t.color);
 }
 
+static bool inside_near(Vec4 v)
+{
+    return v.z >= 0.0f && v.z <= v.w;
+}
+
+ClipVertex intersect_near(ClipVertex a, ClipVertex b)
+{
+    float t = (0.0f - a.p.z) / (b.p.z - a.p.z);
+
+    ClipVertex r;
+    r.p.x = a.p.x + t * (b.p.x - a.p.x);
+    r.p.y = a.p.y + t * (b.p.y - a.p.y);
+    r.p.z = 0.0f;
+    r.p.w = a.p.w + t * (b.p.w - a.p.w);
+
+    r.h   = a.h + t * (b.h - a.h);
+    return r;
+}
+
+int clip_triangle_near(const ClipTriangle *in, ClipTriangle *out)
+{
+    ClipVertex *v = (ClipVertex *)in->v;
+
+    bool in0 = inside_near(v[0].p);
+    bool in1 = inside_near(v[1].p);
+    bool in2 = inside_near(v[2].p);
+
+    int inside_count = in0 + in1 + in2;
+
+    if (inside_count == 0) {
+        return 0; // fully clipped
+    }
+
+    if (inside_count == 3) {
+        out[0] = *in;
+        return 1;
+    }
+
+    // 1 inside → 1 triangle
+    if (inside_count == 1) {
+        int i = in0 ? 0 : in1 ? 1 : 2;
+        int j = (i + 1) % 3;
+        int k = (i + 2) % 3;
+
+        out[0].v[0] = v[i];
+        out[0].v[1] = intersect_near(v[i], v[j]);
+        out[0].v[2] = intersect_near(v[i], v[k]);
+        out[0].color = in->color;
+        return 1;
+    }
+
+    // 2 inside → 2 triangles
+    int a = !in0 ? 0 : !in1 ? 1 : 2;
+    int b = (a + 1) % 3;
+    int c = (a + 2) % 3;
+
+    ClipVertex i1 = intersect_near(v[b], v[a]);
+    ClipVertex i2 = intersect_near(v[c], v[a]);
+
+    out[0].v[0] = v[b];
+    out[0].v[1] = v[c];
+    out[0].v[2] = i1;
+
+    out[1].v[0] = i1;
+    out[1].v[1] = v[c];
+    out[1].v[2] = i2;
+
+    out[0].color = out[1].color = in->color;
+    return 2;
+}
+
+
 // NDC means Normalized Device Coordinates.
 // It’s the coordinate space after projection and perspective divide, and before mapping to screen pixels.
 Point ndc_to_canvas(Vec4 v)
@@ -364,24 +446,48 @@ Point ndc_to_canvas(Vec4 v)
 
 void render_model(Model *model, Mat4 transform)
 {
-    ProjectedPoints projected = {0};
-    for (size_t i = 0; i < (model->vertices)->count; ++i) {
-	Vertex vx = (model->vertices)->items[i];
-	
-	Vec4 vec4 = h_point(vx.pos.x, vx.pos.y, vx.pos.z);
-	vec4 = mat4_mul_vec4(transform, vec4);
-	vec4 = perspective_divide(vec4);
-	
-	vx.pos.x = vec4.x;
-	vx.pos.y = vec4.y;
-	vx.pos.z = vec4.z;
-	
-	da_append(&projected, ndc_to_canvas(vec4));
+    ClipVertex *clip_vertices =
+        malloc(sizeof(ClipVertex) * model->vertices->count);
+
+    // 1. Transform vertices to clip space
+    for (size_t i = 0; i < model->vertices->count; ++i) {
+        Vertex vx = model->vertices->items[i];
+        Vec4 v = h_point(vx.pos.x, vx.pos.y, vx.pos.z);
+        Vec4 clip = mat4_mul_vec4(transform, v);
+
+        clip_vertices[i] = (ClipVertex){
+            .p = clip,
+            .h = vx.h
+        };
     }
-    for (size_t i = 0; i < (model->triangles)->count; ++i) {
-	Triangle t = (model->triangles)->items[i];
-	render_triangle(t, &projected);
+
+    // 2. Clip & draw triangles
+    for (size_t i = 0; i < model->triangles->count; ++i) {
+        Triangle t = model->triangles->items[i];
+
+        ClipTriangle ct = {
+            .v = {
+                clip_vertices[t.indices[0]],
+                clip_vertices[t.indices[1]],
+                clip_vertices[t.indices[2]],
+            },
+            .color = t.color
+        };
+
+        ClipTriangle clipped[2];
+        int n = clip_triangle_near(&ct, clipped);
+
+        for (int k = 0; k < n; ++k) {
+            Point pts[3];
+            for (int v = 0; v < 3; ++v) {
+                Vec4 ndc = perspective_divide(clipped[k].v[v].p);
+                pts[v] = ndc_to_canvas(ndc);
+            }
+            draw_wireframe_triangle(pts[0], pts[1], pts[2], clipped[k].color);
+        }
     }
+
+    free(clip_vertices);
 }
 
 Mat4 make_camera_matrix(Vertex position, float orientation)
